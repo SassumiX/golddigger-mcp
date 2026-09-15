@@ -1,0 +1,30 @@
+{
+  "name": "Golddigger",
+  "description": "B2B Lead Intelligence API — search, enrich and score 10M+ global companies. Freemium: 3 preview leads free, paid plans from $29/mo.",
+  "command": "python3",
+  "args": ["/path/to/golddigger_mcp_server.py"],
+  "env": {
+    "GOLDIGGER_HOST": "https://golddigger.geodinvest.com",
+    "GOLDIGGER_API_KEY": {
+      "placeholder": "Get your key at https://golddigger.gold"
+    }
+  },
+  "tools": [
+    {
+      "name": "search_leads",
+      "description": "Search B2B leads by keyword (company, industry, product, country)"
+    },
+    {
+      "name": "enrich_company",
+      "description": "Enrich a company record with full contact details"
+    },
+    {
+      "name": "score_lead",
+      "description": "Score a lead's quality (hot/warm/cold) based on data source signals"
+    }
+  ],
+  "categories": ["Sales", "Marketing", "Lead Generation", "B2B Data"],
+  "homepage": "https://golddigger.gold",
+  "repository": "https://github.com/SassumiX/golddigger-mcp",
+  "verified": false
+}
