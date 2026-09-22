@@ -99,6 +99,32 @@ Base URL: `https://golddigger.geodinvest.com`
 
 Get your key at [https://golddigger.gold](https://golddigger.gold)
 
+## Reports & Skills
+
+### golddigger-report Skill
+
+一键生成 Golddigger 风格的 B2B 客户画像雷达图 Word 报告（含真实雷达图）。
+
+**支持两种数据源：**
+1. Golddigger.gold API（免费版数据库为空时自动降级）
+2. B2B Lead Engine 网络搜索（兜底方案，始终可用）
+
+**输出：** 带 4 张雷达图的 Word 文档
+
+```bash
+# 在 Mavis Agent 中触发
+/给我生成 xxx.com 的客户画像雷达报告
+
+# 独立运行
+cd skills/golddigger-report/templates
+pip install python-docx matplotlib numpy
+python gen_report.py
+```
+
+详细文档：[`skills/golddigger-report/README.md`](skills/golddigger-report/README.md)
+
+---
+
 ## License
 
 MIT — SassumiX 2026
