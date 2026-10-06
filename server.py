@@ -57,9 +57,99 @@ mcp = FastMCP(
     )
 )
 
-# 默认 Demo Key（仅用于 health check，生产环境客户用自己的 Key）
-DEFAULT_HOST = "https://golddigger.gold"
-DEFAULT_KEY  = "gd_0ae9f120b194578cc24ccab6e006"
+# ── 端点基线（2026-10-06 逐个实测，判定口径：带正确 key 后 404 = 路由不存在）──
+#   GET  /api/health  → 服务健康（免鉴权）
+#   GET  /api/quota   → 账户配额（真实端点；旧版代码用的 /api/tenants/me 从未上线）
+#   GET  /api/leads   → 租户已存线索
+#   POST /api/search  → 搜索（旧版代码用的 GET /api/leads/search 不存在，永远 404）
+DEFAULT_HOST = os.environ.get("GOLDDIGGER_HOST", "https://golddigger.gold")
+DEFAULT_KEY  = os.environ.get("GOLDDIGGER_API_KEY", "")   # 不再内置 demo key
+# 本地软预算：防止 Agent 循环把当天配额一次烧光（默认 = free 计划实测 20 次/天）
+DEFAULT_DAILY_BUDGET = int(os.environ.get("GOLDDIGGER_DAILY_BUDGET", "20"))
+# 本地软预留：剩余低于这个数就不再自动发起搜索，把额度留给人工决策
+QUOTA_RESERVE = int(os.environ.get("GOLDDIGGER_QUOTA_RESERVE", "2"))
+
+
+# ── 共享 HTTP 层 ─────────────────────────────────────────────────────────────
+import urllib.request, urllib.error, urllib.parse, datetime, pathlib
+
+_QUOTA_STATE = pathlib.Path(
+    os.environ.get("GOLDDIGGER_STATE_DIR",
+                   str(pathlib.Path.home() / ".golddigger"))
+).expanduser()
+
+
+def _http_json(method: str, url: str, api_key: str = "",
+               payload: dict = None, timeout: int = 60) -> dict:
+    """返回 {"status": int, "data": dict|None, "error": str|None}，不抛异常。"""
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "Golddigger-MCP/2.0"}
+    if api_key:
+        headers["X-API-KEY"] = api_key
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode(errors="replace")
+            try:
+                return {"status": resp.status, "data": json.loads(raw), "error": None}
+            except json.JSONDecodeError:
+                return {"status": resp.status, "data": {"raw": raw[:500]}, "error": None}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")[:500]
+        return {"status": e.code, "data": None, "error": raw}
+    except Exception as e:
+        return {"status": 0, "data": None, "error": f"{type(e).__name__}: {e}"}
+
+
+def _quota(api_key: str, host: str) -> dict:
+    r = _http_json("GET", f"{host}/api/quota", api_key, timeout=15)
+    if r["status"] != 200 or not r["data"]:
+        return {"ok": False, "http_status": r["status"], "error": r["error"] or "quota 端点不可用"}
+    d = r["data"]
+    used, quota = d.get("used"), d.get("quota")
+    return {
+        "ok": True,
+        "plan": d.get("plan"),
+        "used": used,
+        "quota": quota,
+        "remaining": d.get("remaining", (quota or 0) - (used or 0)),
+        "allowed": d.get("allowed"),
+        "resets_at": d.get("resets_at"),
+    }
+
+
+def _budget_spend(limit: int) -> dict:
+    """本地记账：每天实际发出的搜索次数，防止 Agent 循环超支。"""
+    today = datetime.date.today().isoformat()
+    f = _QUOTA_STATE / "search_budget.json"
+    try:
+        state = json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        state = {}
+    if state.get("date") != today:
+        state = {"date": today, "spent": 0}
+    allowed = state["spent"] < limit
+    if allowed:
+        state["spent"] += 1
+        _QUOTA_STATE.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(state))
+    return {"date": today, "spent": state["spent"], "local_budget": limit,
+            "allowed": allowed, "remaining_local": max(0, limit - state["spent"])}
+
+
+def _explain(status: int, error: str) -> str:
+    if status in (401, 403):
+        return "API key 无效/无权限 —— 检查 GOLDDIGGER_API_KEY"
+    if status == 404:
+        return "端点不存在（404）—— 当前 SDK/文档与线上不一致，见 README_API_NOTES"
+    if status == 429:
+        return "配额用尽（429）—— 等重置或升级 https://golddigger.gold/"
+    if status >= 500:
+        return f"站点侧故障（{status}）—— 不是你的 key 问题，重试无用，等站方修"
+    if status == 0:
+        return f"网络/超时 —— {error}"
+    return error or f"HTTP {status}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -69,75 +159,195 @@ DEFAULT_KEY  = "gd_0ae9f120b194578cc24ccab6e006"
 def health_check(api_key: str = DEFAULT_KEY,
                  host: str = DEFAULT_HOST) -> dict:
     """
-    检查 Golddigger API 连接状态和配额。
+    检查 Golddigger 服务健康 + 账户配额（GET /api/health + GET /api/quota）。
 
     Args:
-        api_key: 客户的 Golddigger API Key（默认 demo key）
+        api_key: 客户的 Golddigger API Key（默认读环境变量 GOLDDIGGER_API_KEY）
         host: Golddigger API 地址（默认 golddigger.gold）
 
     Returns:
-        {"status": "ok"|"error", "db_rows": int, "tier": str, "message": str}
+        {"status":"ok"|"degraded"|"error", "service", "version",
+         "plan", "quota", "used", "remaining", "resets_at",
+         "search_endpoint": "ok"|"degraded", "message"}
     """
-    import urllib.request
+    h = _http_json("GET", f"{host}/api/health", timeout=10)
+    if h["status"] != 200:
+        return {"status": "error", "message": _explain(h["status"], h["error"])}
 
-    url = f"{host}/health"
-    req = urllib.request.Request(url)
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read())
-            db_rows = data.get("db_rows", 0)
-            return {
-                "status": "ok",
-                "db_rows": db_rows,
-                "tier": "SUPER (paid)" if db_rows > 0 else "Free (empty DB)",
-                "message": "✅ Connected" if db_rows > 0
-                           else "⚠️  Free tier — DB is empty. Upgrade to SUPER for real data."
-            }
-    except Exception as e:
-        return {"status": "error", "message": f"Connection failed: {e}"}
+    info = h["data"] or {}
+    out = {
+        "status": "ok",
+        "service": info.get("service"),
+        "version": info.get("version"),
+        "server_time": info.get("time"),
+        "search_endpoint": "unknown",
+    }
+
+    if not api_key:
+        out["status"] = "degraded"
+        out["message"] = "服务在线，但没配 GOLDDIGGER_API_KEY —— 查不了配额，也不能搜索"
+        out["plan"] = out["quota"] = out["used"] = out["remaining"] = None
+        return out
+
+    q = _quota(api_key, host)
+    if not q["ok"]:
+        out["status"] = "degraded"
+        out["message"] = f"服务在线，但配额查询失败：{_explain(q.get('http_status', 0), q.get('error'))}"
+        return out
+
+    out.update({k: q[k] for k in ("plan", "quota", "used", "remaining", "resets_at")})
+    out["quota_allowed"] = q["allowed"]
+    out["message"] = (f"✅ {q['plan']} 方案，今日剩余 {q['remaining']}/{q['quota']}，"
+                      f"{q['resets_at']} 重置")
+
+    # 搜索端点是唯一写接口。要不要主动探一下？
+    # 端点修好之后，一次探测 = 消耗 1 次配额，所以默认关闭，用环境变量开。
+    # （当前服务端 500，探了也不扣配额 —— 2026-10-06 实测 6 次失败后 used 仍为 0）
+    if os.environ.get("GOLDDIGGER_PROBE_SEARCH", "0") == "1":
+        s = _http_json("POST", f"{host}/api/search", api_key,
+                       {"query": "healthcheck", "country": "", "limit": 1}, timeout=45)
+        out["search_endpoint"] = "ok" if s["status"] == 200 else "degraded"
+        if s["status"] != 200:
+            out["search_status_code"] = s["status"]
+            out["search_error"] = _explain(s["status"], s["error"])
+            out["message"] += f" ｜ ⚠️ 搜索端点异常（{s['status']}）：{out['search_error']}"
+            out["status"] = "degraded"
+    else:
+        out["search_endpoint"] = "not_probed（设 GOLDDIGGER_PROBE_SEARCH=1 才探，会烧配额）"
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 工具 2：search_leads
+# 工具 2：check_quota（挖客前必查，防烧配额）
+# ═══════════════════════════════════════════════════════════════════════════
+@mcp.tool()
+def check_quota(api_key: str = DEFAULT_KEY,
+                host: str = DEFAULT_HOST,
+                daily_budget: int = DEFAULT_DAILY_BUDGET) -> dict:
+    """
+    查询服务端配额 + 本地预算账本。批量挖客前先调这个。
+
+    Args:
+        api_key: 客户 API Key（默认读 GOLDDIGGER_API_KEY）
+        host: API 地址
+        daily_budget: 本地软预算（默认 20，可用 GOLDDIGGER_DAILY_BUDGET 覆盖）
+
+    Returns:
+        {"plan","quota","used","remaining","resets_at",
+         "local_spent","local_budget","can_search","recommendation"}
+    """
+    if not api_key:
+        return {"status": "error",
+                "message": "缺少 API key：export GOLDDIGGER_API_KEY=gd_xxx"}
+
+    q = _quota(api_key, host)
+    if not q["ok"]:
+        return {"status": "error",
+                "message": _explain(q.get("http_status", 0), q.get("error"))}
+
+    today = datetime.date.today().isoformat()
+    f = _QUOTA_STATE / "search_budget.json"
+    try:
+        state = json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        state = {}
+    spent = state.get("spent", 0) if state.get("date") == today else 0
+
+    can = q["allowed"] and q["remaining"] > QUOTA_RESERVE and spent < daily_budget
+    if not can:
+        rec = "配额不够了：先按 query 优先级挑几条跑，别全量刷；或升级 https://golddigger.gold/"
+    elif q["remaining"] <= 5:
+        rec = f"只剩 {q['remaining']} 次，优先跑角色词（进口商/开发商/集团采购），泛需求词先别碰"
+    else:
+        rec = f"可跑约 {min(q['remaining'] - QUOTA_RESERVE, daily_budget - spent)} 次，按优先级排"
+
+    return {"status": "ok", "plan": q["plan"], "quota": q["quota"], "used": q["used"],
+            "remaining": q["remaining"], "resets_at": q["resets_at"],
+            "local_spent": spent, "local_budget": daily_budget,
+            "can_search": can, "recommendation": rec,
+            "state_file": str(f)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 工具 3：search_leads
 # ═══════════════════════════════════════════════════════════════════════════
 @mcp.tool()
 def search_leads(keyword: str,
                  limit: int = 20,
+                 country: str = "",
                  api_key: str = DEFAULT_KEY,
-                 host: str = DEFAULT_HOST) -> dict:
+                 host: str = DEFAULT_HOST,
+                 dry_run: bool = False,
+                 skip_quota_check: bool = False) -> dict:
     """
-    搜索 Golddigger B2B 客户数据库。
+    搜索 B2B 买家/供应商（POST /api/search）。
 
-    ⚠️ 注意：免费版 db_rows=0，搜索永远返回空结果。
-       客户需升级 SUPER 套餐（¥499+/月）才有真实数据。
+    ⚠️ 每次调用消耗 1 次配额。批量挖客前先调 check_quota。
+    Agent 循环调用前请设 dry_run=True 预演，不会消耗配额。
 
     Args:
-        keyword: 搜索词——公司名、行业、产品关键词、国家
-        limit: 返回数量上限（默认 20）
-        api_key: 客户的 Golddigger API Key
-        host: Golddigger API 地址
+        keyword: 搜索词——买家视角的采购意图词，如 "smart lock distributor wanted"
+        limit: 返回数量上限（默认 20，最大 500）
+        country: 国家代码（AE/SA/NG…），空 = 不限
+        api_key: 客户 API Key（默认读 GOLDDIGGER_API_KEY）
+        host: API 地址
+        dry_run: 只返回将要发出的请求，不真调（不消耗配额）
+        skip_quota_check: 跳过配额预检（不推荐）
 
     Returns:
-        {"count": int, "leads": [{"name","country","type","industry"}, ...]}
+        {"status":"ok"|"quota_exhausted"|"server_error"|"error",
+         "count", "total_found", "leads", "query", "country", "usage"}
     """
-    import urllib.request, urllib.parse
+    if not keyword or not keyword.strip():
+        return {"status": "error", "message": "keyword 不能为空"}
 
-    params = urllib.parse.urlencode({"q": keyword, "limit": min(limit, 100)})
-    url = f"{host}/api/leads/search?{params}"
+    limit = max(1, min(int(limit), 500))
+    payload = {"query": keyword.strip(), "country": country or "", "limit": limit}
 
-    req = urllib.request.Request(url, headers={
-        "X-API-KEY": api_key,
-        "User-Agent": "Golddigger-MCP/1.0"
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except Exception as e:
-        return {"error": str(e), "leads": [], "count": 0}
+    if dry_run:
+        return {"status": "dry_run", "would_call": f"POST {host}/api/search",
+                "payload": payload, "quota_cost": 1,
+                "message": "预演模式，未发出请求"}
+
+    if not api_key:
+        return {"status": "error",
+                "message": "缺少 API key：export GOLDDIGGER_API_KEY=gd_xxx"}
+
+    if not skip_quota_check:
+        q = _quota(api_key, host)
+        if not q["ok"]:
+            return {"status": "error",
+                    "message": _explain(q.get("http_status", 0), q.get("error"))}
+        if not q["allowed"] or q["remaining"] <= 0:
+            return {"status": "quota_exhausted", "leads": [], "count": 0,
+                    "remaining": q["remaining"], "resets_at": q["resets_at"],
+                    "message": "今日配额已用尽，明天再来"}
+        if q["remaining"] <= QUOTA_RESERVE:
+            return {"status": "quota_exhausted", "leads": [], "count": 0,
+                    "remaining": q["remaining"], "resets_at": q["resets_at"],
+                    "message": f"只剩 {q['remaining']} 次（保留线 {QUOTA_RESERVE}），先别搜了"}
+
+    b = _budget_spend(DEFAULT_DAILY_BUDGET)
+    r = _http_json("POST", f"{host}/api/search", api_key, payload, timeout=120)
+
+    if r["status"] != 200:
+        return {"status": "server_error" if r["status"] >= 500 else "error",
+                "count": 0, "leads": [], "query": payload["query"],
+                "http_status": r["status"],
+                "message": _explain(r["status"], r["error"])}
+
+    d = r["data"] or {}
+    leads = d.get("leads", []) or []
+    q2 = _quota(api_key, host)
+    return {"status": "ok", "count": len(leads),
+            "total_found": d.get("total_found", len(leads)),
+            "leads": leads, "query": payload["query"], "country": payload["country"],
+            "usage": {"remaining": q2.get("remaining"), "used": q2.get("used"),
+                      "local_spent": b["spent"], "local_budget": b["local_budget"]}}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 工具 3：score_lead
+# 工具 4：score_lead
 # ═══════════════════════════════════════════════════════════════════════════
 @mcp.tool()
 def score_lead(company: str,
@@ -219,7 +429,7 @@ def score_lead(company: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 工具 4：generate_report（核心商业工具）
+# 工具 5：generate_report（核心商业工具）
 # ═══════════════════════════════════════════════════════════════════════════
 @mcp.tool()
 def generate_report(company_name: str,
@@ -256,7 +466,7 @@ def generate_report(company_name: str,
             "output_path": str,   ← .docx 文件本地路径
             "radar_count": int,   ← 生成的雷达图数量
             "buyers_scored": [ {"name": str, "total": int, "tier": str}, ... ],
-            "db_status": str      ← "SUPER (real data)" | "Free (sample data)"
+            "db_status": str      ← 账户方案 + 剩余配额（真实接口 /api/quota）
         }
     """
     import urllib.request, urllib.parse, os, tempfile
@@ -409,14 +619,15 @@ def generate_report(company_name: str,
         ax.set_title('Three-Buyer Comparison Radar', size=12, fontweight='bold', color='#1A1A2E', pad=18)
         plt.tight_layout(); plt.savefig(fname, dpi=150, bbox_inches='tight', facecolor='#F9FAFB'); plt.close()
 
-    # ── 检查 GD DB 状态 ──
-    req_h = urllib.request.Request(f"{host}/health")
-    try:
-        with urllib.request.urlopen(req_h, timeout=5) as resp:
-            health_data = json.loads(resp.read())
-        db_rows = health_data.get("db_rows", 0)
-    except:
-        db_rows = 0
+    # ── 读取账户状态（/api/health + /api/quota，2026-10-06 实测的真实端点）──
+    health_data = _http_json("GET", f"{host}/api/health", timeout=10).get("data") or {}
+    quota_data = _quota(api_key, host) if api_key else {"ok": False}
+    db_status = (
+        f"{quota_data.get('plan')} 方案 · 剩余 {quota_data.get('remaining')}"
+        f"/{quota_data.get('quota')}（{quota_data.get('resets_at')} 重置）"
+        if quota_data.get("ok") else
+        f"服务 {health_data.get('status', 'unknown')} · 配额未知（未提供 API key）"
+    )
 
     # ── 评分 + 构造 buyers ──
     scored = []
@@ -556,8 +767,7 @@ def generate_report(company_name: str,
         "output_path": out_doc,
         "radar_count": 4,
         "buyers_scored": [{"name": b["name"], "total": b["total"], "tier": b["tier"]} for b in scored],
-        "db_status": f"SUPER (real data, db_rows={db_rows})" if db_rows > 0
-                     else "Free (sample data — upgrade to SUPER for real leads)",
+        "db_status": db_status,
         "token_owner": "customer_provided",
         "data_footprint": "local_only"
     }

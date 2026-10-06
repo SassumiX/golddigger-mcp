@@ -1,26 +1,35 @@
 {
   "name": "Golddigger",
-  "description": "B2B Lead Intelligence API — search, enrich and score 10M+ global companies. Freemium: 3 preview leads free, paid plans from $29/mo.",
+  "description": "B2B Lead Intelligence MCP Server — search, score and report on B2B leads. Scoring and report generation run fully locally; only search touches the API (customer's own key, customer's own cost).",
   "command": "python3",
-  "args": ["/path/to/golddigger_mcp_server.py"],
+  "args": ["server.py", "--transport", "stdio"],
   "env": {
-    "GOLDIGGER_HOST": "https://golddigger.geodinvest.com",
-    "GOLDIGGER_API_KEY": {
-      "placeholder": "Get your key at https://golddigger.gold"
-    }
+    "GOLDDIGGER_HOST": "https://golddigger.gold",
+    "GOLDDIGGER_API_KEY": "<get your key at https://golddigger.gold/ui/>",
+    "GOLDDIGGER_DAILY_BUDGET": "20",
+    "GOLDDIGGER_QUOTA_RESERVE": "2",
+    "GOLDDIGGER_STATE_DIR": "~/.golddigger"
   },
   "tools": [
     {
-      "name": "search_leads",
-      "description": "Search B2B leads by keyword (company, industry, product, country)"
+      "name": "health_check",
+      "description": "Check service health + real account quota (GET /api/health + GET /api/quota)"
     },
     {
-      "name": "enrich_company",
-      "description": "Enrich a company record with full contact details"
+      "name": "check_quota",
+      "description": "Quota pre-flight: server remaining + local daily budget ledger. Call before any batch search."
+    },
+    {
+      "name": "search_leads",
+      "description": "Search B2B leads by buyer-intent keyword + country (POST /api/search, costs 1 quota per call, supports dry_run)"
     },
     {
       "name": "score_lead",
-      "description": "Score a lead's quality (hot/warm/cold) based on data source signals"
+      "description": "Six-dimension lead quality scoring — fully local, no API call"
+    },
+    {
+      "name": "generate_report",
+      "description": "Radar chart + Word client profile report — fully local, no API call"
     }
   ],
   "categories": ["Sales", "Marketing", "Lead Generation", "B2B Data"],
