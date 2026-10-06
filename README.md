@@ -19,6 +19,7 @@ A Model Context Protocol (MCP) server that wraps the [Golddigger API](https://go
 | `search_leads` | Search by buyer-intent keyword + country (`POST /api/search`) | External API call, **1 quota each** |
 | `score_lead` | Six-dimension quality scoring | **Local only** |
 | `generate_report` | Full radar chart + Word report | **Local only** |
+| `draft_outreach` | Role-aware outreach draft + local queue CSV | **Local only**, 0 quota |
 
 ## Data Sovereignty
 
@@ -143,6 +144,28 @@ result = golddigger.score_lead(
 
 > ⚠️ 别信任何写死的配额数字，**以 `check_quota` 的实时返回为准**。
 > Get your key at [https://golddigger.gold](https://golddigger.gold)
+
+## outreach 是主线（不是 search）
+
+`search` 每天只有 20 次，`draft_outreach` **不限次数、不耗配额** —— 因为找人的成本高，
+开口的成本为零。所以工作流必须是：
+
+```
+check_quota → search_leads(dry_run) → search_leads → 对每条 lead 跑 draft_outreach → 进 outreach_queue.csv → 按 D0/D3/D7/D14 跟进
+```
+
+`draft_outreach` 会按公司描述自动识别角色（进口商 / 地产开发商 / 酒店 / 民宿）并切换话术，
+支持 `email` / `linkedin` / `whatsapp` / `wechat` 与中英双语，队列按 company+channel 去重。
+
+```python
+r = golddigger.draft_outreach(
+    lead={"company": "Bin Harkil Group", "contact": "Procurement",
+          "country": "SA", "industry": "real estate developer"},
+    my_profile="smart lock factory, OEM/ODM, CE, MOQ 200, 7-day samples",
+    channel="email", language="en",
+)
+# r["subject"], r["body"], r["followup_plan"], r["quota_cost"] == 0
+```
 
 ## 已知问题 / 端点实测（2026-10-06）
 

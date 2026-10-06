@@ -71,7 +71,7 @@ QUOTA_RESERVE = int(os.environ.get("GOLDDIGGER_QUOTA_RESERVE", "2"))
 
 
 # ── 共享 HTTP 层 ─────────────────────────────────────────────────────────────
-import urllib.request, urllib.error, urllib.parse, datetime, pathlib
+import urllib.request, urllib.error, urllib.parse, datetime, pathlib, csv
 
 _QUOTA_STATE = pathlib.Path(
     os.environ.get("GOLDDIGGER_STATE_DIR",
@@ -771,6 +771,178 @@ def generate_report(company_name: str,
         "token_owner": "customer_provided",
         "data_footprint": "local_only"
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 工具 6：draft_outreach（纯本地，0 配额 —— outreach 是挖客的落点，不该烧额度）
+# ═══════════════════════════════════════════════════════════════════════════
+
+_OUTREACH_ROLE_RULES = [
+    ("rental",     ["rental", "short term", "vacation", "airbnb", "民宿", "短租", "出租"],
+     "self-checkin / remote code, no key handover",
+     "自助入住 / 远程发码，省掉交接钥匙"),
+    ("developer",  ["developer", "real estate", "property", "project", "construction", "地产", "开发商", "工程"],
+     "already shipped locks to comparable projects, spec-sheet ready",
+     "同类项目已发货，规格书可直接进顾问评审"),
+    ("hotel",      ["hotel", "resort", "hospitality", "公寓", "酒店", "度假村"],
+     "front-desk & guest-room keyless, cost per room",
+     "前台 + 客房无钥匙方案，按房间算成本"),
+    ("importer",   ["importer", "import", "distribut", "wholesale", "进口", "经销", "批发"],
+     "MOQ + CE/FCC + 7-day samples, price list ready",
+     "MOQ + 认证齐全，样品 7 天，报价单已备好"),
+]
+
+_OUTREACH_TEMPLATES_EN = {
+    "rental": ("Quick question about {company}",
+               "Hi {contact},\n\n"
+               "I'm from a smart lock factory in China — we build self-cleaning locks for rental units: "
+               "remote code issue, no key handover, 12-month battery.\n\n"
+               "We work with rental operators in {country}. Your units look like a fit if you manage "
+               "hundreds of doors, not dozens.\n\n"
+               "Worth sending the 2 models that fit your unit count?"),
+    "developer": ("Locks for {company} project",
+                  "Hi {contact},\n\n"
+                  "We supply fingerprint and aluminium-door locks to {country} hotel/real-estate projects — "
+                  "8,000 doors shipped to date.\n\n"
+                  "Do you have an upcoming project where door hardware is being specified? "
+                  "I can send samples + a full spec sheet your consultant can drop into the tender pack.\n\n"
+                  "Who handles door hardware specification on your side?"),
+    "hotel": ("Keyless rooms for {company}",
+              "Hi {contact},\n\n"
+              "We build smart locks for hotels — front desk and guest rooms, no key cards to reprint, "
+              "revoke a room in one tap.\n\n"
+              "Useful number: cost per room, installed.\n\n"
+              "Want me to send our hotel spec sheet + price list?"),
+    "_default": ("Smart locks, direct from the factory",
+                 "Hi {contact},\n\n"
+                 "I'm from a smart lock factory in China — OEM/ODM, CE certified, MOQ 200.\n\n"
+                 "Your market ({country}) is growing fast for fingerprint and aluminium-door locks, "
+                 "and I thought of you as a fit for {industry}.\n\n"
+                 "Can I send our price list for the 3 models that fit your channel?"),
+}
+
+_OUTREACH_TEMPLATES_CN = {
+    "_default": ("智能锁工厂直供 —— 出口{region}",
+                 "{contact} 你好，\n\n"
+                 "我们是做智能锁的工厂，OEM/ODM 都做，CE 认证齐全，MOQ 200 起。\n\n"
+                 "{company} 在 {country} 做 {industry}，这块我们正好有成熟产线："
+                 "指纹锁、铝合金门锁，防水款是中东/非洲的常卖型号。\n\n"
+                 "方便的话我把报价单和 3 款推荐型号发您？"),
+}
+
+
+@mcp.tool()
+def draft_outreach(lead: dict,
+                   my_profile: str = "",
+                   channel: str = "email",
+                   language: str = "en",
+                   company_note: str = "",
+                   save: bool = True,
+                   queue_file: str = "") -> dict:
+    """
+    为一条 lead 生成触达草稿（outreach）—— 纯本地，**不消耗任何配额**。
+
+    挖客的价值落在 outreach 上：search 只负责把人捞出来，触达才是花钱的地方。
+    所以这个工具刻意做成 0 API 调用，纯本地模板 + 角色识别。
+
+    Args:
+        lead: {"company": str, "contact": str, "country": str, "industry": str}
+              （search_leads 返回的 lead 直接传进来即可）
+        my_profile: 一句话自我介绍，例如
+                    "smart lock factory, OEM/ODM, CE, MOQ 200, 7-day samples"
+        channel: email | linkedin | whatsapp | wechat（只影响长度和格式）
+        language: en | cn
+        company_note: 你对这家公司做的功课，会被拼进开头钩子
+        save: 是否写入本地 outreach 队列 CSV（按 company+channel 去重）
+        queue_file: 队列文件，默认 outreach_queue.csv
+
+    Returns:
+        {"status", "role", "channel", "language", "subject", "body",
+         "followup_plan", "quota_cost": 0, "queue_path"}
+    """
+    lead = lead or {}
+    company = (lead.get("company") or "").strip()
+    contact = (lead.get("contact") or "").strip()
+    country = (lead.get("country") or "").strip()
+    industry = (lead.get("industry") or "").strip()
+
+    if not company:
+        return {"status": "error", "message": "lead.company 不能为空"}
+
+    blob = " ".join([company, industry, company_note, lead.get("note") or ""]).lower()
+    role = "_default"
+    for name, keys, _proof, _cn in _OUTREACH_ROLE_RULES:
+        if any(k in blob for k in keys):
+            role = name
+            break
+
+    tpl = (_OUTREACH_TEMPLATES_CN if language == "cn" else _OUTREACH_TEMPLATES_EN)
+    subject, body = tpl.get(role) or tpl["_default"]
+
+    region = {"AE": "中东", "SA": "沙特", "NG": "尼日利亚", "ZA": "南非",
+              "ID": "印尼", "US": "美国"}.get(country.upper(), country or "海外")
+    fmt = dict(company=company or "[公司名]", contact=contact or "[称呼]",
+               country=country or "[国家]", industry=industry or "本地市场", region=region)
+    try:
+        subject = subject.format(**fmt)
+        body = body.format(**fmt)
+    except KeyError:
+        pass
+
+    if my_profile:
+        body = body.rstrip() + f"\n\n（{my_profile}）" if language == "cn" \
+            else body.rstrip() + f"\n\n— {my_profile}"
+
+    if channel == "linkedin":
+        limit = 480 if language == "en" else 300
+        body = (body[:limit] + "…") if len(body) > limit else body
+    elif channel in ("whatsapp", "wechat"):
+        paras = [p for p in body.split("\n\n")[1:] if p.strip()]  # 跳过称呼
+        short = " ".join(paras[:2]) if paras else body
+        cap = 260 if language == "en" else 200
+        body = short[:cap] + ("…" if len(short) > cap else "")
+
+    result = {
+        "status": "ok", "role": role, "channel": channel, "language": language,
+        "subject": subject, "body": body,
+        "followup_plan": ["D0 发送", "D3 无回复 → 换角度再发一次（只换第一句）",
+                          "D7 无回复 → 附一份价格区间/案例图", "D14 无回复 → 归档，不再追"],
+        "quota_cost": 0, "data_footprint": "local_only",
+    }
+
+    if save:
+        path = queue_file or "outreach_queue.csv"
+        path = os.path.abspath(path)
+        exists = os.path.exists(path) and os.path.getsize(path) > 0
+        rows = []
+        if exists:
+            try:
+                with open(path, newline="", encoding="utf-8-sig") as f:
+                    rows = list(csv.DictReader(f))
+            except Exception:
+                rows = []
+        dup = any((r.get("company") or "").lower() == company.lower()
+                  and r.get("channel") == channel and r.get("status") != "sent"
+                  for r in rows)
+        if dup:
+            result["queue_path"] = path
+            result["queue_note"] = "队列里已有未发送记录，跳过"
+            return result
+        new_rows = rows + [{
+            "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "company": company, "contact": contact, "country": country,
+            "industry": industry, "role": role, "channel": channel,
+            "language": language, "subject": subject,
+            "status": "drafted", "note": company_note,
+        }]
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=["created_at", "company", "contact", "country",
+                                              "industry", "role", "channel", "language",
+                                              "subject", "status", "note"])
+            w.writeheader()
+            w.writerows(new_rows)
+        result["queue_path"] = path
+    return result
 
 
 # ── Entry Point ─────────────────────────────────────────────────────────────
