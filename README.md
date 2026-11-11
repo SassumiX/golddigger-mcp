@@ -23,22 +23,29 @@
 
 ### 安装 —— 3 种方式，都不需要 npm 账号
 
-**A · npx 直接跑（推荐）**
+**A · npm 安装（推荐）**
 ```bash
-GOLDDIGGER_API_KEY=gd_xxxxx npx -y github:SassumiX/golddigger-mcp
+npm install git+https://github.com/SassumiX/golddigger-mcp.git
+GOLDDIGGER_API_KEY=gd_xxxxx npx golddigger-mcp
 ```
+
+> 💡 `npx github:SassumiX/golddigger-mcp` 这种简写在部分 npm 版本上会**静默失败**
+> （`npm exec` 处理 git specifier 时 exit 128，无任何报错输出）。
+> 上面的 `npm install` + `npx <bin>` 写法已实测可用。
 
 **B · GitHub Release zip（固定版本快照，离线可用）**
 ```bash
 curl -LO https://github.com/SassumiX/golddigger-mcp/releases/download/v2.0.0/golddigger-mcp-v2.0.0.zip
 unzip golddigger-mcp-v2.0.0.zip
+cd golddigger-mcp-v2.0.0
 node node/index.js
 ```
 
 **C · 官方站直下（国内速度快）**
 ```bash
-curl -LO https://golddigger.gold/static/diggerkit-v2.0.0.zip
-unzip diggerkit-v2.0.0.zip
+curl -LO https://golddigger.gold/static/diggerkit-mcp-v2.0.0.zip
+unzip diggerkit-mcp-v2.0.0.zip
+cd golddigger-mcp-v2.0.0
 node node/index.js
 ```
 
@@ -49,7 +56,7 @@ node node/index.js
   "mcpServers": {
     "golddigger": {
       "command": "npx",
-      "args": ["-y", "github:SassumiX/golddigger-mcp"],
+      "args": ["golddigger-mcp"],
       "env": {
         "GOLDDIGGER_API_KEY": "gd_xxxxx"
       }
@@ -131,7 +138,7 @@ npm registry 需要 npm 账号 + 发布 token。没有可用凭证时，
 所以官方分发固定走这三条路，**三条指向同一份源码**（`node/index.js`），
 不存在「npm 版和官网版不一样」的问题：
 
-1. **npx + GitHub**（`npx github:SassumiX/golddigger-mcp`）—— 无账号依赖，版本跟 Git tag 走
+1. **npm install git+https://…**（实测可用）—— 无 npm 账号依赖，版本跟 Git tag 走
 2. **GitHub Release zip** —— 固定版本快照，离线可用
 3. **官方站 `/static/*.zip`** —— 国内直连，走 Caddy 显式 MIME 路由
 
