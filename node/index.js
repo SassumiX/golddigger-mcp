@@ -181,7 +181,21 @@ async function t_check_readiness() {
         plan: q.plan,
         resets_at: q.resets_at,
       };
-      if (!q.allowed) blockers.push('配额已用完, 等周期重置或升级');
+      if (!q.allowed) blockers.push('API 配额已用完, 等 UTC 00:00 重置或升级');
+      // 挖客行动池 (DiggerKit C/C+) — 独立于 API 池 (2026-11-11)
+      const dig = q.pools && q.pools.dig;
+      if (dig) {
+        report.checks.dig_quota = {
+          ok: !!dig.allowed,
+          allowed: dig.allowed,
+          actions_left: dig.actions_left,
+          quota: dig.quota,
+          used: dig.used,
+          cost_per_action: dig.cost_per_action,
+          resets_at: dig.resets_at,
+        };
+        if (!dig.allowed) blockers.push('今日挖客行动次数已用完 (次日 UTC 00:00 自动重置)');
+      }
     } catch (e) {
       report.checks.quota = { ok: false, reason: e.message };
       if (e.code !== 'invalid_key') blockers.push(`配额查询失败: ${e.message}`);
@@ -189,16 +203,29 @@ async function t_check_readiness() {
   }
 
   report.ready = blockers.length === 0;
+  const _api = report.checks.quota || {};
+  const _dig = report.checks.dig_quota || {};
   report.summary = report.ready
-    ? '✅ 可以开工 — 先 check_quota 确认余量, 再 search_leads'
+    ? `✅ 可以开工 — API 池剩 ${_api.remaining ?? '?'} 次, 挖客行动剩 ${_dig.actions_left ?? '?'} 次`
     : `🚫 有 ${blockers.length} 项阻塞, 见 blockers`;
   return report;
 }
 
 async function t_check_quota() {
   const q = await apiRequest('GET', '/api/quota');
+  // 人话总结: 两个独立池子, 别把「次」和「挖客行动」搞混 (2026-11-11)
+  const dig = q.pools && q.pools.dig;
+  const apiLine = q.unlimited
+    ? `API 池: 无限 (${q.plan} 档)`
+    : `API 池: ${q.remaining}/${q.quota} 次 (search_leads / kb_ask 各扣 1 次)`;
+  const digLine = !dig
+    ? '挖客池: (后端未返回)'
+    : dig.unlimited
+      ? '挖客池: 无限 (Whitelabel 档豁免)'
+      : `挖客池: ${dig.actions_left} 次挖客行动 (DiggerKit C/C+, 每次扣 ${dig.cost_per_action} Quota, 不占 API 池)`;
   return {
     ...q,
+    summary: `${apiLine} · ${digLine} · 次日 UTC 00:00 各自重置`,
     _provenance: {
       source: 'GET /api/quota',
       note: '只读, 不消耗配额',

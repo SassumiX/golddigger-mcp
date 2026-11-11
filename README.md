@@ -35,17 +35,17 @@ GOLDDIGGER_API_KEY=gd_xxxxx npx golddigger-mcp
 
 **B · GitHub Release zip（固定版本快照，离线可用）**
 ```bash
-curl -LO https://github.com/SassumiX/golddigger-mcp/releases/download/v2.0.0/golddigger-mcp-v2.0.0.zip
-unzip golddigger-mcp-v2.0.0.zip
-cd golddigger-mcp-v2.0.0
+curl -LO https://github.com/SassumiX/golddigger-mcp/releases/download/v2.1.0/golddigger-mcp-v2.1.0.zip
+unzip golddigger-mcp-v2.1.0.zip
+cd golddigger-mcp-v2.1.0
 node node/index.js
 ```
 
 **C · 官方站直下（国内速度快）**
 ```bash
-curl -LO https://golddigger.gold/static/diggerkit-mcp-v2.0.0.zip
-unzip diggerkit-mcp-v2.0.0.zip
-cd golddigger-mcp-v2.0.0
+curl -LO https://golddigger.gold/static/diggerkit-mcp-v2.1.0.zip
+unzip diggerkit-mcp-v2.1.0.zip
+cd golddigger-mcp-v2.1.0
 node node/index.js
 ```
 
@@ -85,6 +85,16 @@ API Key 前缀决定角色：`gds_` = 供应商（挖客），`gdb_` = 买家。
 | `check_quota` | 剩余配额、套餐、重置时间 | 外部调用（只读，不消耗配额） |
 | `check_answerable` | 覆盖度预检：这次计划挖 N 条，够不够 | 本地 + `/api/quota` |
 | `search_leads` | 按产品关键词 + 国家 + 行业检索潜在买家 | 外部调用，**每次 1 配额** |
+
+### 两个配额池（2026-11-11 起）
+
+| 池 | 覆盖 | 单位 | 额度 |
+|---|---|---|---|
+| API 池 | `search_leads` | 次 | Starter 20 / Pro 100 / Premium 500 / Whitelabel 无限 |
+| 挖客行动池 | DiggerKit C / C+ | Quota | 每天 1000 Quota = **10 次挖客行动** |
+
+两池互不占用，各自 UTC 00:00 重置。Whitelabel 豁免挖客池。
+`check_quota` 会直接给一句人话总结。
 
 ### 工作流
 

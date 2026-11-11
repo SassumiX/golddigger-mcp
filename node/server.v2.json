@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.sassumix/golddigger-mcp",
-  "description": "GoldDigger DiggerKit-C+ MCP server — 工厂 Agent 一击接入挖客。零依赖 Node.js, 4 个只读工具 (check_readiness / check_quota / check_answerable / search_leads)。数据客户自抓, Token 客户自购, 0 留存 0 抽佣。",
-  "version": "2.0.0",
+  "description": "GoldDigger DiggerKit-C+ MCP server — 工厂 Agent 一击接入挖客。零依赖 Node.js, 4 个只读工具 (check_readiness / check_quota / check_answerable / search_leads)。双配额池: API 池 (按档位次数) + 挖客行动池 (每天 1000 Quota = 10 次, DiggerKit C/C+)。数据客户自抓, Token 客户自购, 0 留存 0 抽佣。",
+  "version": "2.1.0",
   "websiteUrl": "https://golddigger.gold",
   "repository": {
     "url": "https://github.com/SassumiX/golddigger-mcp",
@@ -12,7 +12,7 @@
     {
       "registryType": "npm",
       "identifier": "github:SassumiX/golddigger-mcp",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "transport": { "type": "stdio" }
     }
   ],

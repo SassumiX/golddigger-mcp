@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "golddigger": {
+      "command": "node",
+      "args": ["/absolute/path/to/golddigger-mcp/index.js"],
+      "env": {
+        "GOLDDIGGER_API_KEY": "gds_xxxxxxxx",
+        "GOLDDIGGER_BASE_URL": "https://golddigger.gold"
+      }
+    }
+  }
+}
