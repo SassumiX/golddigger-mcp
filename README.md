@@ -17,34 +17,46 @@
 
 ---
 
-## v2.0（Node.js，推荐）
+## v2.1（Node.js，推荐）
 
 零依赖、单文件、`npx` 即跑。
 
 ### 安装 —— 3 种方式，都不需要 npm 账号
 
-**A · npm 安装（推荐）**
+**A · zip 直下（推荐 · 国内最稳）**
+```bash
+curl -LO https://golddigger.gold/static/diggerkit-mcp-v2.1.0.zip
+unzip diggerkit-mcp-v2.1.0.zip
+cd golddigger-mcp-v2.1.0
+node node/index.js
+```
+官方站直下，不依赖 GitHub，国内速度最快。GitHub Release 快照同版本：
+<https://github.com/SassumiX/golddigger-mcp/releases/download/v2.1.0/golddigger-mcp-v2.1.0.zip>
+
+**B · npm 安装**
 ```bash
 npm install git+https://github.com/SassumiX/golddigger-mcp.git
 GOLDDIGGER_API_KEY=gd_xxxxx npx golddigger-mcp
 ```
 
+> ⚠️ **npm 会把 `git+https://` 悄悄改成 SSH 去 clone**（`hosted-git-info` 的偏好），
+> 你没配 SSH key 就会报 `Permission denied (publickey)` —— 看着像权限问题，其实是网络问题。
+> 报错时先加这一行再试：
+> ```bash
+> git config --global http.version HTTP/1.1
+> ```
+> （HTTP/2 在部分网络/代理下会被中途切断。HTTPS 通了 npm 就不会回落 SSH。）
+>
 > 💡 `npx github:SassumiX/golddigger-mcp` 这种简写在部分 npm 版本上会**静默失败**
 > （`npm exec` 处理 git specifier 时 exit 128，无任何报错输出）。
-> 上面的 `npm install` + `npx <bin>` 写法已实测可用。
+> 用上面的 `npm install` + `npx <bin>` 写法。
+>
+> 国内网络下 **A 方式（zip）更稳**，推荐优先选 A。
 
-**B · GitHub Release zip（固定版本快照，离线可用）**
+**C · GitHub Release zip（固定版本快照，离线可用）**
 ```bash
 curl -LO https://github.com/SassumiX/golddigger-mcp/releases/download/v2.1.0/golddigger-mcp-v2.1.0.zip
 unzip golddigger-mcp-v2.1.0.zip
-cd golddigger-mcp-v2.1.0
-node node/index.js
-```
-
-**C · 官方站直下（国内速度快）**
-```bash
-curl -LO https://golddigger.gold/static/diggerkit-mcp-v2.1.0.zip
-unzip diggerkit-mcp-v2.1.0.zip
 cd golddigger-mcp-v2.1.0
 node node/index.js
 ```
@@ -77,7 +89,7 @@ node node/index.js
 
 API Key 前缀决定角色：`gds_` = 供应商（挖客），`gdb_` = 买家。越权返回 `KEY_ROLE_MISMATCH`（403）。
 
-### v2.0 工具集
+### v2.1 工具集
 
 | 工具 | 说明 | 数据流 |
 |---|---|---|

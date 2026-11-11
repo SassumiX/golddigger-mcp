@@ -99,6 +99,7 @@ async function apiRequest(method, path, body, query) {
 const TOOLS = [
   {
     name: 'check_readiness',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       '检查部署是否可用: API Key 有效性 + 配额状态 + 后端连通性。' +
       '一次报出所有阻塞项。接入后先调这个。',
@@ -106,6 +107,7 @@ const TOOLS = [
   },
   {
     name: 'check_quota',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       '查剩余配额与套餐周期 (只读, 不消耗配额)。' +
       '挖客前先查, 避免白跑。',
@@ -113,6 +115,7 @@ const TOOLS = [
   },
   {
     name: 'search_leads',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       '挖客: 按产品关键词 + 国家 + 行业检索潜在买家, 返回带评分的线索列表。' +
       '⚠️ 消耗配额 (每次 1 次)。limit 1-10。' +
@@ -130,6 +133,7 @@ const TOOLS = [
   },
   {
     name: 'check_answerable',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       '判断当前配额与配置能否支撑这次挖客需求。' +
       '覆盖不足就明说, 不做无意义的调用。',
@@ -343,7 +347,7 @@ async function handle(msg) {
       return {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'golddigger-mcp', version: '2.0.0' },
+        serverInfo: { name: 'golddigger-mcp', version: '2.1.0' },
       };
 
     case 'notifications/initialized':
