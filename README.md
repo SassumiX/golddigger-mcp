@@ -1,190 +1,142 @@
-# Golddigger MCP Server
+# GoldDigger MCP Server
 
-> B2B Lead Intelligence API — search, enrich & score 10M+ global companies from any MCP-compatible client.
+**DiggerKit-C+ · 工厂 Agent 一击接入挖客**
 
 [![MCP Server](https://img.shields.io/badge/MCP-Server-green)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Data Sovereignty](https://img.shields.io/badge/Data-Local%20Only-blue)](https://golddigger.gold)
 
-## What is this?
+> B2B Lead Intelligence API — 让任何 MCP 客户端（Claude / Cursor / Cline / 你的 SI Agent）接入 GoldDigger 挖客。
 
-A Model Context Protocol (MCP) server that wraps the [Golddigger API](https://golddigger.gold) — giving AI assistants (Claude, Cline, Cursor, etc.) the ability to search, enrich, and score B2B leads in real time.
+**两个版本，同一份数据主权承诺：**
 
-**4 tools exposed:**
+| 版本 | 语言 | 依赖 | 工具 | 状态 |
+|---|---|---|---|---|
+| **v2.0** | Node.js ≥18 | **零依赖** | 4 个（3 只读 + 1 受控写） | ✅ **推荐** |
+| v1 | Python ≥3.9 | matplotlib / python-docx 等 | 6 个（含 3 个纯本地工具） | 已归档，仍可用 |
 
-| Tool | Description | Data Flow |
-|------|-------------|-----------|
-| `health_check` | Service health + **real** account quota (`/api/health` + `/api/quota`) | External API call |
-| `check_quota` | 挖客前预检：服务端剩余 + 本地每日预算账本 | External API call |
-| `search_leads` | Search by buyer-intent keyword + country (`POST /api/search`) | External API call, **1 quota each** |
-| `score_lead` | Six-dimension quality scoring | **Local only** |
-| `generate_report` | Full radar chart + Word report | **Local only** |
-| `draft_outreach` | Role-aware outreach draft + local queue CSV | **Local only**, 0 quota |
+---
 
-## Data Sovereignty
+## v2.0（Node.js，推荐）
 
-- ✅ **Report generation**: 100% local (matplotlib + python-docx). No data leaves the user's machine.
-- ✅ **Scoring**: Pure local computation — six-dimension model runs on-device.
-- ⚠️ **Search**: Calls Golddigger API. Customer provides their own API key — costs borne by customer.
+零依赖、单文件、`npx` 即跑。
 
-## Installation
+### 安装 —— 3 种方式，都不需要 npm 账号
 
+**A · npx 直接跑（推荐）**
 ```bash
-git clone https://github.com/SassumiX/golddigger-mcp.git
-cd golddigger-mcp
-pip install -r requirements.txt
+GOLDDIGGER_API_KEY=gd_xxxxx npx -y github:SassumiX/golddigger-mcp
 ```
 
-## Configuration
-
+**B · GitHub Release zip（固定版本快照，离线可用）**
 ```bash
-# Set your Golddigger API key (customer provides their own)
-export GOLDDIGGER_API_KEY="gd_your_key_here"
-export GOLDDIGGER_HOST="https://golddigger.gold"   # 可选
-export GOLDDIGGER_DAILY_BUDGET=20     # 可选：本地软预算，默认 20
-export GOLDDIGGER_QUOTA_RESERVE=2     # 可选：剩余低于此值不再自动搜
+curl -LO https://github.com/SassumiX/golddigger-mcp/releases/download/v2.0.0/golddigger-mcp-v2.0.0.zip
+unzip golddigger-mcp-v2.0.0.zip
+node node/index.js
 ```
 
-> **Token billing**: The `search_leads` tool uses the customer's API key. Report generation is free (no external API calls).
+**C · 官方站直下（国内速度快）**
+```bash
+curl -LO https://golddigger.gold/static/diggerkit-v2.0.0.zip
+unzip diggerkit-v2.0.0.zip
+node node/index.js
+```
 
-## Usage
-
-### Claude Desktop (macOS)
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+### 接入 MCP 客户端
 
 ```json
 {
   "mcpServers": {
     "golddigger": {
-      "command": "python3",
-      "args": ["/FULL/PATH/TO/golddigger-mcp/server.py", "--transport", "stdio"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop.
-
-### Cline / Other MCP Clients
-
-```json
-{
-  "mcpServers": {
-    "golddigger": {
-      "command": "python3",
-      "args": ["/FULL/PATH/TO/golddigger-mcp/server.py", "--transport", "stdio"],
+      "command": "npx",
+      "args": ["-y", "github:SassumiX/golddigger-mcp"],
       "env": {
-        "GOLDDIGGER_API_KEY": "gd_your_key_here"
+        "GOLDDIGGER_API_KEY": "gd_xxxxx"
       }
     }
   }
 }
 ```
 
-### HTTP Endpoint
+已下载 zip 的把 `command` 换成 `node`、`args` 指向 `node/index.js` 即可。
+
+### 环境变量
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `GOLDDIGGER_API_KEY` | 是 | 你的 API Key，在 <https://golddigger.gold/ui/> 取 |
+| `GOLDDIGGER_BASE_URL` | 否 | 默认 `https://golddigger.gold`，自建部署时改 |
+| `GOLDDIGGER_TIMEOUT_MS` | 否 | 单次请求超时，默认 20000 |
+
+API Key 前缀决定角色：`gds_` = 供应商（挖客），`gdb_` = 买家。越权返回 `KEY_ROLE_MISMATCH`（403）。
+
+### v2.0 工具集
+
+| 工具 | 说明 | 数据流 |
+|---|---|---|
+| `check_readiness` | 一次报出所有阻塞项：key 有效性 + 后端连通 + 配额 | 外部调用（不消耗配额） |
+| `check_quota` | 剩余配额、套餐、重置时间 | 外部调用（只读，不消耗配额） |
+| `check_answerable` | 覆盖度预检：这次计划挖 N 条，够不够 | 本地 + `/api/quota` |
+| `search_leads` | 按产品关键词 + 国家 + 行业检索潜在买家 | 外部调用，**每次 1 配额** |
+
+### 工作流
+
+```
+check_readiness  → 确认 key / 后端 / 配额都正常
+      ↓
+check_quota      → 看还剩多少次
+      ↓
+check_answerable → 这次计划挖 N 条，够不够
+      ↓
+search_leads     → 逐次挖（每次 1 配额，挖到就转化，不要囤着等以后）
+```
+
+**配额不对称**：搜索花 1 次配额，外联（写邮件 / WhatsApp）花 0 次。
+「挖 10 条只跟 3 条」是浪费额度 —— 挖 5 条全部跟完才是正常节奏。
+
+---
+
+## v1（Python，已归档）
+
+功能更全 —— 除检索外还有**三个纯本地工具**（本地评分 / 雷达图报告 / 外联草稿），数据完全不出本机。
+完整文档见 [`README.v1-python.md`](README.v1-python.md)。
 
 ```bash
-python3 server.py --transport streamable-http --port 8080
+git clone https://github.com/SassumiX/golddigger-mcp.git
+cd golddigger-mcp
+pip install -r requirements.txt
+export GOLDDIGGER_API_KEY="gd_your_key_here"
+python3 server.py --transport stdio
 ```
 
-## MCP Tools
+MCP Registry manifest：[`server.v1-python.json`](server.v1-python.json)（原 `server.json`）。
 
-### generate_report（商业核心工具）
+---
 
-```
-用户说："出客户画像报告"
-Agent 自动调用 → 生成本地 .docx 文件
-```
+## 数据主权
 
-```python
-# Agent 调用示例
-result = golddigger.generate_report(
-    company_name="cnpulk.com",
-    product_desc="DTH drill bits, rock drilling tools",
-    buyers=[
-        {
-            "name": "Afrimat Limited",
-            "country": "南非",
-            "industry": "Mining",
-            "has_contact": True,
-            "scale": "上市矿业集团",
-            "buyer_role": "Contract Mining总监",
-            "purchase_needs": "DTH钻头，持续消耗",
-            "contacts": ["pierre@afrimat.co.za · +27 82 411 7475"],
-            "outreach": "We offer 20-30% cost savings on DTH bits."
-        },
-        # ... 2 more buyers
-    ],
-    api_key="gd_customer_own_key"   # 客户自己的Key，费用自担
-)
-# result["output_path"] → 本地 .docx 文件路径
-```
+- ✅ **Token 客户自购** —— 模型开销走客户自己的账户，我们不代付
+- ✅ **数据客户自抓** —— 线索返回给调用方即止，我们不留存
+- ✅ **0 抽佣** —— 不抽流水
+- ✅ **不代找客户** —— 只把你的关键词变成检索请求，结果来自公开 B2B 数据源
+- ✅ **不保证认证** —— 检索到的只是线索，不是已验证的合规身份
 
-### score_lead
+---
 
-```python
-result = golddigger.score_lead(
-    company="Afrimat Limited",
-    country="南非",
-    industry="Mining",
-    has_contact=True,
-    scale="上市矿业集团",
-    note="并购整合期"
-)
-# result["total"] = 91, result["tier"] = "HOT"
-```
+## 为什么没发 npm registry
 
-## Pricing
+npm registry 需要 npm 账号 + 发布 token。没有可用凭证时，
+硬把包装到别人账号下会造成「谁维护、谁收 telemetry、谁能下架」的归属混乱。
 
-| Plan | 每日配额 |
-|------|---------|
-| Free | **20 次/天**（2026-10-06 由 `GET /api/quota` 实测得出，00:00 UTC 重置） |
-| Paid | 见 [https://golddigger.gold](https://golddigger.gold) |
+所以官方分发固定走这三条路，**三条指向同一份源码**（`node/index.js`），
+不存在「npm 版和官网版不一样」的问题：
 
-> ⚠️ 别信任何写死的配额数字，**以 `check_quota` 的实时返回为准**。
-> Get your key at [https://golddigger.gold](https://golddigger.gold)
+1. **npx + GitHub**（`npx github:SassumiX/golddigger-mcp`）—— 无账号依赖，版本跟 Git tag 走
+2. **GitHub Release zip** —— 固定版本快照，离线可用
+3. **官方站 `/static/*.zip`** —— 国内直连，走 Caddy 显式 MIME 路由
 
-## outreach 是主线（不是 search）
-
-`search` 每天只有 20 次，`draft_outreach` **不限次数、不耗配额** —— 因为找人的成本高，
-开口的成本为零。所以工作流必须是：
-
-```
-check_quota → search_leads(dry_run) → search_leads → 对每条 lead 跑 draft_outreach → 进 outreach_queue.csv → 按 D0/D3/D7/D14 跟进
-```
-
-`draft_outreach` 会按公司描述自动识别角色（进口商 / 地产开发商 / 酒店 / 民宿）并切换话术，
-支持 `email` / `linkedin` / `whatsapp` / `wechat` 与中英双语，队列按 company+channel 去重。
-
-```python
-r = golddigger.draft_outreach(
-    lead={"company": "Bin Harkil Group", "contact": "Procurement",
-          "country": "SA", "industry": "real estate developer"},
-    my_profile="smart lock factory, OEM/ODM, CE, MOQ 200, 7-day samples",
-    channel="email", language="en",
-)
-# r["subject"], r["body"], r["followup_plan"], r["quota_cost"] == 0
-```
-
-## 已知问题 / 端点实测（2026-10-06）
-
-| 端点 | 状态 |
-|---|---|
-| `GET /api/health` | ✅ |
-| `GET /api/quota` | ✅ 真实配额端点（旧代码用的 `/api/tenants/me` 从未上线） |
-| `GET /api/leads` | ✅ |
-| `POST /api/search` | ⚠️ **当前 500**，站点侧故障，重试无用（5xx 不扣配额） |
-| `GET /api/leads/search` | ❌ 从未部署（旧 `search_leads` 打的就是这个，恒 404） |
-
-## 配额纪律（Agent 必读）
-
-1. **批量挖客前先调 `check_quota`**，别让 Agent 自由发挥地循环搜索。
-2. `search_leads(dry_run=True)` 可以预演请求，不烧配额 —— 先批量预演，再挑着真跑。
-3. 本地预算账本写在 `~/.golddigger/search_budget.json`，默认上限 20/天，按天重置。
-4. 剩余 ≤ 2 次（`GOLDDIGGER_QUOTA_RESERVE`）时 `search_leads` 直接拒绝发起，留额度给人工决策。
-5. 优先级：**采购角色词 > 产品细分词 > 泛需求词**。泛需求词最费额度、命中率最低。
+---
 
 ## License
 
-MIT — SassumiX 2026
+MIT

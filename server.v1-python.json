@@ -1,0 +1,39 @@
+{
+  "name": "Golddigger",
+  "description": "B2B Lead Intelligence MCP Server — search, score and report on B2B leads. Scoring and report generation run fully locally; only search touches the API (customer's own key, customer's own cost).",
+  "command": "python3",
+  "args": ["server.py", "--transport", "stdio"],
+  "env": {
+    "GOLDDIGGER_HOST": "https://golddigger.gold",
+    "GOLDDIGGER_API_KEY": "<get your key at https://golddigger.gold/ui/>",
+    "GOLDDIGGER_DAILY_BUDGET": "20",
+    "GOLDDIGGER_QUOTA_RESERVE": "2",
+    "GOLDDIGGER_STATE_DIR": "~/.golddigger"
+  },
+  "tools": [
+    {
+      "name": "health_check",
+      "description": "Check service health + real account quota (GET /api/health + GET /api/quota)"
+    },
+    {
+      "name": "check_quota",
+      "description": "Quota pre-flight: server remaining + local daily budget ledger. Call before any batch search."
+    },
+    {
+      "name": "search_leads",
+      "description": "Search B2B leads by buyer-intent keyword + country (POST /api/search, costs 1 quota per call, supports dry_run)"
+    },
+    {
+      "name": "score_lead",
+      "description": "Six-dimension lead quality scoring — fully local, no API call"
+    },
+    {
+      "name": "generate_report",
+      "description": "Radar chart + Word client profile report — fully local, no API call"
+    }
+  ],
+  "categories": ["Sales", "Marketing", "Lead Generation", "B2B Data"],
+  "homepage": "https://golddigger.gold",
+  "repository": "https://github.com/SassumiX/golddigger-mcp",
+  "verified": false
+}

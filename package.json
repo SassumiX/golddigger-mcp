@@ -1,0 +1,31 @@
+{
+  "name": "golddigger-mcp",
+  "version": "2.0.0",
+  "description": "DiggerKit-C+ · MCP server · 工厂 Agent 一击接入挖客 (只读工具集)",
+  "bin": {
+    "golddigger-mcp": "./node/index.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "golddigger",
+    "diggerkit",
+    "b2b",
+    "lead-generation",
+    "si-agent"
+  ],
+  "license": "MIT",
+  "files": [
+    "node/",
+    "mcp.json",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SassumiX/golddigger-mcp.git"
+  },
+  "homepage": "https://github.com/SassumiX/golddigger-mcp#readme"
+}
